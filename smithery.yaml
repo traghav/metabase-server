@@ -1,0 +1,37 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - metabaseUrl
+      - metabaseUsername
+      - metabasePassword
+    properties:
+      metabaseUrl:
+        type: string
+        description: URL of the Metabase instance (e.g. https://your-metabase-instance.com)
+      metabaseUsername:
+        type: string
+        description: Username for authenticating with Metabase
+      metabasePassword:
+        type: string
+        description: Password for authenticating with Metabase
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: 'node',
+      args: ['build/index.js'],
+      env: {
+        METABASE_URL: config.metabaseUrl,
+        METABASE_USERNAME: config.metabaseUsername,
+        METABASE_PASSWORD: config.metabasePassword
+      }
+    })
+  exampleConfig:
+    metabaseUrl: https://example-metabase.com
+    metabaseUsername: example_user
+    metabasePassword: example_password
