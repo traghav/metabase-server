@@ -1,29 +1,40 @@
 # metabase-server MCP Server
 
-A Model Context Protocol server
+A Model Context Protocol server for Metabase integration.
 
-This is a TypeScript-based MCP server that implements a simple notes system. It demonstrates core MCP concepts by providing:
+This is a TypeScript-based MCP server that implements integration with Metabase API. It allows AI assistants to interact with Metabase, providing access to:
 
-- Resources representing text notes with URIs and metadata
-- Tools for creating new notes
-- Prompts for generating summaries of notes
+- Dashboards, questions/cards, and databases as resources
+- Tools for listing and executing Metabase queries
+- Ability to view and interact with Metabase data
 
 ## Features
 
 ### Resources
-- List and access notes via `note://` URIs
-- Each note has a title, content and metadata
-- Plain text mime type for simple content access
+- List and access Metabase resources via `metabase://` URIs
+- Access dashboards, cards/questions, and databases
+- JSON content type for structured data access
 
 ### Tools
-- `create_note` - Create new text notes
-  - Takes title and content as required parameters
-  - Stores note in server state
+- `list_dashboards` - List all dashboards in Metabase
+- `list_cards` - List all questions/cards in Metabase
+- `list_databases` - List all databases in Metabase
+- `execute_card` - Execute a Metabase question/card and get results
+- `get_dashboard_cards` - Get all cards in a dashboard
+- `execute_query` - Execute a SQL query against a Metabase database
 
-### Prompts
-- `summarize_notes` - Generate a summary of all stored notes
-  - Includes all note contents as embedded resources
-  - Returns structured prompt for LLM summarization
+## Configuration
+
+Before running the server, you need to set the following environment variables:
+
+```bash
+# Required environment variables
+export METABASE_URL=https://your-metabase-instance.com
+export METABASE_USERNAME=your_username
+export METABASE_PASSWORD=your_password
+```
+
+You can set these environment variables in your shell profile or use a `.env` file with a package like `dotenv`.
 
 ## Development
 
@@ -53,11 +64,18 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "metabase-server": {
-      "command": "/path/to/metabase-server/build/index.js"
+      "command": "/path/to/metabase-server/build/index.js",
+      "env": {
+        "METABASE_URL": "https://your-metabase-instance.com",
+        "METABASE_USERNAME": "your_username",
+        "METABASE_PASSWORD": "your_password"
+      }
     }
   }
 }
 ```
+
+Note: You can also set these environment variables in your system instead of in the config file if you prefer.
 
 ### Debugging
 
