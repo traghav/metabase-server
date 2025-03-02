@@ -1,5 +1,7 @@
 # metabase-server MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@imlewc/metabase-server)](https://smithery.ai/server/@imlewc/metabase-server)
+
 A Model Context Protocol server for Metabase integration.
 
 This is a TypeScript-based MCP server that implements integration with Metabase API. It allows AI assistants to interact with Metabase, providing access to:
@@ -76,6 +78,14 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 ```
 
 Note: You can also set these environment variables in your system instead of in the config file if you prefer.
+
+### Installing via Smithery
+
+To install metabase-server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@imlewc/metabase-server):
+
+```bash
+npx -y @smithery/cli install @imlewc/metabase-server --client claude
+```
 
 ### Debugging
 
