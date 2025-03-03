@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// 为老版本 Node.js 添加 AbortController polyfill
+import AbortController from 'abort-controller';
+global.AbortController = global.AbortController || AbortController;
+
 /**
  * Metabase MCP 服务器
  * 实现与 Metabase API 的交互，提供以下功能：
@@ -13,15 +17,35 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  CallToolRequestSchema,
-  ErrorCode,
   ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListToolsRequestSchema,
-  McpError,
   ReadResourceRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesResult,
+  ReadResourceResult,
+  ResourceSchema,
+  ToolSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import axios from "axios";
+import { z } from "zod";
+import axios, { AxiosInstance } from "axios";
+
+// 自定义错误枚举
+enum ErrorCode {
+  InternalError = "internal_error",
+  InvalidRequest = "invalid_request",
+  InvalidParams = "invalid_params",
+  MethodNotFound = "method_not_found"
+}
+
+// 自定义错误类
+class McpError extends Error {
+  code: ErrorCode;
+  
+  constructor(code: ErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "McpError";
+  }
+}
 
 // 从环境变量获取 Metabase 配置
 const METABASE_URL = process.env.METABASE_URL;
@@ -32,9 +56,18 @@ if (!METABASE_URL || !METABASE_USERNAME || !METABASE_PASSWORD) {
   throw new Error("METABASE_URL, METABASE_USERNAME, and METABASE_PASSWORD environment variables are required");
 }
 
+// 创建自定义 Schema 对象，使用 z.object
+const ListResourceTemplatesRequestSchema = z.object({
+  method: z.literal("resources/list_templates")
+});
+
+const ListToolsRequestSchema = z.object({
+  method: z.literal("tools/list")
+});
+
 class MetabaseServer {
   private server: Server;
-  private axiosInstance;
+  private axiosInstance: AxiosInstance;
   private sessionToken: string | null = null;
 
   constructor() {
@@ -61,12 +94,54 @@ class MetabaseServer {
     this.setupResourceHandlers();
     this.setupToolHandlers();
     
-    // 错误处理
-    this.server.onerror = (error) => console.error('[MCP Error]', error);
+    // Enhanced error handling with logging
+    this.server.onerror = (error: Error) => {
+      this.logError('Server Error', error);
+    };
+
     process.on('SIGINT', async () => {
+      this.logInfo('Shutting down server...');
       await this.server.close();
       process.exit(0);
     });
+  }
+
+  // Add logging utilities
+  private logInfo(message: string, data?: unknown) {
+    const logMessage = {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message,
+      data
+    };
+    console.error(JSON.stringify(logMessage));
+    // MCP SDK changed, can't directly access session
+    try {
+      // Use current session if available
+      console.error(`INFO: ${message}`);
+    } catch (e) {
+      // Ignore if session not available
+    }
+  }
+
+  private logError(message: string, error: unknown) {
+    const errorObj = error as Error;
+    const apiError = error as { response?: { data?: { message?: string } }, message?: string };
+    
+    const logMessage = {
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message,
+      error: errorObj.message || 'Unknown error',
+      stack: errorObj.stack
+    };
+    console.error(JSON.stringify(logMessage));
+    // MCP SDK changed, can't directly access session
+    try {
+      console.error(`ERROR: ${message} - ${errorObj.message || 'Unknown error'}`);
+    } catch (e) {
+      // Ignore if session not available
+    }
   }
 
   /**
@@ -77,6 +152,7 @@ class MetabaseServer {
       return this.sessionToken;
     }
 
+    this.logInfo('Authenticating with Metabase...');
     try {
       const response = await this.axiosInstance.post('/api/session', {
         username: METABASE_USERNAME,
@@ -88,9 +164,10 @@ class MetabaseServer {
       // 设置默认请求头
       this.axiosInstance.defaults.headers.common['X-Metabase-Session'] = this.sessionToken;
       
+      this.logInfo('Successfully authenticated with Metabase');
       return this.sessionToken as string;
     } catch (error) {
-      console.error('Failed to authenticate with Metabase:', error);
+      this.logError('Authentication failed', error);
       throw new McpError(
         ErrorCode.InternalError,
         'Failed to authenticate with Metabase'
@@ -102,14 +179,15 @@ class MetabaseServer {
    * 设置资源处理程序
    */
   private setupResourceHandlers() {
-    // 列出可用资源
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    this.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+      this.logInfo('Listing resources...', { requestStructure: JSON.stringify(request) });
       await this.getSessionToken();
 
       try {
         // 获取仪表板列表
         const dashboardsResponse = await this.axiosInstance.get('/api/dashboard');
         
+        this.logInfo('Successfully listed resources', { count: dashboardsResponse.data.length });
         // 将仪表板作为资源返回
         return {
           resources: dashboardsResponse.data.map((dashboard: any) => ({
@@ -120,7 +198,7 @@ class MetabaseServer {
           }))
         };
       } catch (error) {
-        console.error('Failed to list resources:', error);
+        this.logError('Failed to list resources', error);
         throw new McpError(
           ErrorCode.InternalError,
           'Failed to list Metabase resources'
@@ -156,9 +234,10 @@ class MetabaseServer {
 
     // 读取资源
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      this.logInfo('Reading resource...', { requestStructure: JSON.stringify(request) });
       await this.getSessionToken();
 
-      const uri = request.params.uri;
+      const uri = request.params?.uri;
       let match;
 
       try {
@@ -169,7 +248,7 @@ class MetabaseServer {
           
           return {
             contents: [{
-              uri: request.params.uri,
+              uri: request.params?.uri,
               mimeType: "application/json",
               text: JSON.stringify(response.data, null, 2)
             }]
@@ -183,7 +262,7 @@ class MetabaseServer {
           
           return {
             contents: [{
-              uri: request.params.uri,
+              uri: request.params?.uri,
               mimeType: "application/json",
               text: JSON.stringify(response.data, null, 2)
             }]
@@ -197,7 +276,7 @@ class MetabaseServer {
           
           return {
             contents: [{
-              uri: request.params.uri,
+              uri: request.params?.uri,
               mimeType: "application/json",
               text: JSON.stringify(response.data, null, 2)
             }]
@@ -315,10 +394,11 @@ class MetabaseServer {
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      this.logInfo('Calling tool...', { requestStructure: JSON.stringify(request) });
       await this.getSessionToken();
 
       try {
-        switch (request.params.name) {
+        switch (request.params?.name) {
           case "list_dashboards": {
             const response = await this.axiosInstance.get('/api/dashboard');
             return {
@@ -350,7 +430,7 @@ class MetabaseServer {
           }
 
           case "execute_card": {
-            const cardId = request.params.arguments?.card_id;
+            const cardId = request.params?.arguments?.card_id;
             if (!cardId) {
               throw new McpError(
                 ErrorCode.InvalidParams,
@@ -358,7 +438,7 @@ class MetabaseServer {
               );
             }
 
-            const parameters = request.params.arguments?.parameters || {};
+            const parameters = request.params?.arguments?.parameters || {};
             const response = await this.axiosInstance.post(`/api/card/${cardId}/query`, { parameters });
             
             return {
@@ -370,7 +450,7 @@ class MetabaseServer {
           }
 
           case "get_dashboard_cards": {
-            const dashboardId = request.params.arguments?.dashboard_id;
+            const dashboardId = request.params?.arguments?.dashboard_id;
             if (!dashboardId) {
               throw new McpError(
                 ErrorCode.InvalidParams,
@@ -389,9 +469,9 @@ class MetabaseServer {
           }
           
           case "execute_query": {
-            const databaseId = request.params.arguments?.database_id;
-            const query = request.params.arguments?.query;
-            const nativeParameters = request.params.arguments?.native_parameters || [];
+            const databaseId = request.params?.arguments?.database_id;
+            const query = request.params?.arguments?.query;
+            const nativeParameters = request.params?.arguments?.native_parameters || [];
             
             if (!databaseId) {
               throw new McpError(
@@ -429,10 +509,15 @@ class MetabaseServer {
           }
           
           default:
-            throw new McpError(
-              ErrorCode.MethodNotFound,
-              `Unknown tool: ${request.params.name}`
-            );
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Unknown tool: ${request.params?.name}`
+                }
+              ],
+              isError: true
+            };
         }
       } catch (error) {
         if (axios.isAxiosError(error)) {
@@ -450,11 +535,39 @@ class MetabaseServer {
   }
 
   async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('Metabase MCP server running on stdio');
+    try {
+      this.logInfo('Starting Metabase MCP server...');
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      this.logInfo('Metabase MCP server running on stdio');
+    } catch (error) {
+      this.logError('Failed to start server', error);
+      throw error;
+    }
   }
 }
+
+// Add global error handlers
+process.on('uncaughtException', (error: Error) => {
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'fatal',
+    message: 'Uncaught Exception',
+    error: error.message,
+    stack: error.stack
+  }));
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+  const errorMessage = reason instanceof Error ? reason.message : String(reason);
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'fatal',
+    message: 'Unhandled Rejection',
+    error: errorMessage
+  }));
+});
 
 const server = new MetabaseServer();
 server.run().catch(console.error);
