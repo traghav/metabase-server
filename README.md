@@ -143,10 +143,10 @@ Note: You can also set these environment variables in your system instead of in 
 
 ### Installing via Smithery
 
-To install metabase-server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@imlewc/metabase-server):
+To install metabase-server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@traghav/metabase-server):
 
 ```bash
-npx -y @smithery/cli install @imlewc/metabase-server --client claude
+npx -y @smithery/cli install @traghav/metabase-server --client claude
 ```
 
 ### Debugging
